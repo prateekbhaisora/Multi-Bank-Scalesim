@@ -1,0 +1,14 @@
+- scale.py is called by the user
+- It parses all the arguements given by the user and then invokes a scalesim class object from scale_sim.py, with user arguements
+- The scalesim objects gets initialized (includes a simulator object from simulator.py) and sets all parameters in scale_sim.py and then returns
+- scale.py calls run_scale() of scale_sim.py and logs output in path told using -p
+- The run_scale() invokes run_once() to print all configs, which in turn starts simulator by invoking run() in simulator.py
+- The run() creates a simulator for each layer in our topology file, by creating a single_layer_sim object from single_layer_sim.py
+- The single_layer_sim initializes its arguements and then returns.
+- run() appends all layer simulators to a list called single_layer_sim_object_list.
+- Now, for all single_layer_obj in single_layer_sim_object_list, we try to create console reports and then create BANDWIDTH, COMPUTE, and 
+DETAILED_ACCESS reports
+- To do this, run() invokes generate_reports() which invokes get_compute_report_items(), get_detail_report_items, and get_bandwidth_report_items() 
+of single_layer_obj in single_layer_sim.py
+- All the three functions calls calc_report_data() in the same single_layer_sim.py
+- calc_report_data() calls methods from double_buffered_scratchpad_mem.py and files in compute folder.
