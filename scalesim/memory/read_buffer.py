@@ -41,13 +41,15 @@ class read_buffer:
         # Access counts
         self.num_access = 0
 
-        # Trace matrix
-        self.trace_matrix = np.ones((1, 1))
+        # Trace matrices for our DRAMs
+        self.trace_matrix_1 = np.ones((1, 1))
+        self.trace_matrix_2 = np.ones((1, 1))
 
         # Flags
         self.active_buf_full_flag = False
         self.hashed_buffer_valid = False
-        self.trace_valid = False
+        self.trace_1_valid = False
+        self.trace_2_valid = False
 
     #
     def set_params(self, backing_buf_obj,
@@ -102,29 +104,36 @@ class read_buffer:
         self.num_access = 0
 
         # Trace matrix
-        self.trace_matrix = np.ones((1, 1))
+        self.trace_matrix_1 = np.ones((1, 1))
+        self.trace_matrix_2 = np.ones((1, 1))
 
         # Flags
         self.active_buf_full_flag = False
         self.hashed_buffer_valid = False
-        self.trace_valid = False
+        self.trace_1_valid = False
+        self.trace_2_valid = False
 
-    #
+    # This function is called first for IFMAP and then for FILTER
+    # This function prepares a fetch matrix based on the provided input matrix, for simulating memory access patterns, 
+    # and then prepares hashed buffer data structure for efficient handling of the fetched data.
     def set_fetch_matrix(self, fetch_matrix_np):
         # The operand matrix determines what to pre-fetch into both active and prefetch buffers
         # In 'user' mode, this will be set in the set_params
 
-        num_elems = fetch_matrix_np.shape[0] * fetch_matrix_np.shape[1]
-        num_lines = int(math.ceil(num_elems / self.req_gen_bandwidth))
+        num_elems = fetch_matrix_np.shape[0] * fetch_matrix_np.shape[1]     # Total number of prefetch requests
+        num_lines = int(math.ceil(num_elems / self.req_gen_bandwidth))      # Total number of response cycles
         self.fetch_matrix = np.ones((num_lines, self.req_gen_bandwidth)) * -1
+        
+        # print(num_elems, num_lines)
 
         # Put stuff into the fetch matrix
         # This is done to ensure that there is no shape mismatch
         # Not sure if this is the optimal way to do it or not
         for i in range(num_elems):
+            
             src_row = math.floor(i / fetch_matrix_np.shape[1])
             src_col = math.floor(i % fetch_matrix_np.shape[1])
-
+            
             dest_row = math.floor(i / self.req_gen_bandwidth)
             dest_col = math.floor(i % self.req_gen_bandwidth)
 
@@ -204,7 +213,13 @@ class read_buffer:
         # return True
         return False
 
-    #
+    '''
+    This processes incoming read requests. 
+    It checks if an address is in the active buffer and returns with a hit latency if it is found, 
+    otherwise, it updates the active buffer and handles prefetching. 
+    The method iterates through the incoming requests, handling potential stalls and 
+    returning an array of cycles corresponding to the requests buffer.
+    '''
     def service_reads(self, incoming_requests_arr_np,   # 2D array with the requests
                             incoming_cycles_arr):       # 1D vector with the cycles at which req arrived
         # Service the incoming read requests
@@ -214,13 +229,20 @@ class read_buffer:
         #        Else, make the contents of prefetch buffer as active and then check
         #              finish till an ongoing prefetch is done before reassiging prefetch buffer
 
+        # If the active buffer is not full, it extracts the start cycle from the incoming cycles array (first element)
+        # and calls the prefetch_active_buffer method with this start cycle.
         if not self.active_buf_full_flag:
             start_cycle = incoming_cycles_arr[0][0]
+            # The prefetch_active_buffer method is responsible for populating the active buffer with data. 
+            # It takes into account the entire operand matrix, considering the tile order and other factors.
             self.prefetch_active_buffer(start_cycle=start_cycle)    # Needs to use the entire operand matrix
                                                                     # keeping in mind the tile order and everything
 
+        # Initializes an empty list out_cycles_arr to store the cycles at which requests are serviced.
         out_cycles_arr = []
+        # Initializes an offset variable with the hit latency of the buffer. This offset represents the delay introduced by cache hits.
         offset = self.hit_latency
+        # Iterates over each row of the incoming requests array 
         # for cycle, request_line in tqdm(zip(incoming_cycles_arr, incoming_requests_arr_np)):
         for i in tqdm(range(incoming_requests_arr_np.shape[0]), disable=True):
             cycle = incoming_cycles_arr[i]
@@ -228,6 +250,7 @@ class read_buffer:
             # request_line = set(incoming_requests_arr_np[i]) #shaves off a few seconds
             request_line = incoming_requests_arr_np[i]
 
+            # Skip invalid addresses in request line
             for addr in request_line:
                 if addr == -1:
                     continue
@@ -240,58 +263,107 @@ class read_buffer:
                     potential_stall_cycles = self.last_prefect_cycle - (cycle + offset)
                     offset += potential_stall_cycles        # Offset increments if there were potential stalls
 
+            # Calculates the cycle at which the request is serviced by adding the cycle and the offset.
             out_cycles = cycle + offset
+            # Appends the calculated cycle to the out_cycles_arr list.
             out_cycles_arr.append(out_cycles)
 
+        # Converts the list of serviced cycles (out_cycles_arr) into a NumPy array and reshapes it.
         out_cycles_arr_np = np.asarray(out_cycles_arr).reshape((len(out_cycles_arr), 1))
 
         return out_cycles_arr_np
 
-    #
+    # This function is called first for IFMAP and then for FILTER
     def prefetch_active_buffer(self, start_cycle):
         # Depending on size of the active buffer, calculate the number of lines from op mat to fetch
         # Also, calculate the cycles arr for requests
 
         # 1. Preparing the requests:
+        # Calculates the number of lines to fetch based on the size of the active buffer and the bandwidth of request generation.
+        # Checks if the calculated number of lines is less than the total number of lines in the fetch matrix. 
+        # If not, it sets the number of lines to fetch as the total number of lines in the fetch matrix.
         num_lines = math.ceil(self.active_buf_size / self.req_gen_bandwidth)
         if not num_lines < self.fetch_matrix.shape[0]:
             num_lines = self.fetch_matrix.shape[0]
 
+        # Computes the total size of data requested by multiplying the number of lines to fetch by the request generation bandwidth.
         requested_data_size = num_lines * self.req_gen_bandwidth
+        # Updates the num_access attribute, which tracks the total number of accesses made to the buffer.
         self.num_access += requested_data_size
 
+        # Determines the start and end indices for slicing the fetch matrix to extract the prefetch requests.
         start_idx = 0
         end_idx = num_lines
 
+        # Slices the fetch matrix to obtain the prefetch requests for the specified range of lines.
         prefetch_requests = self.fetch_matrix[start_idx:end_idx, :]
 
         # 1.1 See if extra requests are made, if so nullify them
-        self.next_col_prefetch_idx = 0
+        self.next_col_prefetch_idx = 0                  # Indicates the column index for the next prefetch
+        # If the requested data size exceeds the size of the active buffer, i.e., there are extra requests.
+        # So, it sets the extra elements beyond the active buffer size to -1, indicating no request, as they
+        # can't be serviced either ways.
         if requested_data_size > self.active_buf_size:
             valid_cols = int(self.active_buf_size % self.req_gen_bandwidth)
             row = end_idx - 1
             self.next_col_prefetch_idx = valid_cols
             for col in range(valid_cols, self.req_gen_bandwidth):
-                prefetch_requests[row][col] = -1
+                prefetch_requests[row][col] = -1                    # Matrix of size n * m
 
         # TODO: Tally and check if this agrees with the contents of the hashed buffer
 
         # 2. Preparing the cycles array
-        #    The start_cycle variable ensures that all the requests have been made before any incoming reads came
-        cycles_arr = np.zeros((num_lines, 1))
+        # The start_cycle variable ensures that all the requests have been made before any incoming reads came
+        # Initializes a NumPy array cycles_arr to store the cycles at which the requests are made.
+        cycles_arr = np.zeros((num_lines, 1))                       # Column vector of size n * 1
+        # Calculates the cycle for each request based on the start cycle, taking into account the latency of the backing buffer.
         for i in range(cycles_arr.shape[0]):
             cycles_arr[i][0] = -1 * (num_lines - start_cycle - (i - self.backing_buffer.get_latency()))
 
         # 3. Send the request and get the response cycles count
+        # Calls the service_reads method of the backing buffer to service the prefetch requests and obtain the response cycles array.
         response_cycles_arr = self.backing_buffer.service_reads(incoming_cycles_arr=cycles_arr,
-                                                                incoming_requests_arr_np=prefetch_requests)
+                                                                incoming_requests_arr_np=prefetch_requests) # Column vector of size n * 1
 
         # 4. Update the variables
+        # Updates the attribute self.last_prefect_cycle with the cycle of the last prefetch response.
         self.last_prefect_cycle = int(response_cycles_arr[-1][0])
 
+        # '''
+        # # Original code ........................................................................
+        # '''
         # Update the trace matrix
-        self.trace_matrix = np.concatenate((response_cycles_arr, prefetch_requests), axis=1)
-        self.trace_valid = True
+        # self.trace_matrix_1 = np.concatenate((response_cycles_arr, prefetch_requests), axis=1)
+        # self.trace_matrix_2 = np.concatenate((response_cycles_arr, prefetch_requests), axis=1)
+
+        # '''
+        # # My changes for Mapping Technique - 2 ........................................................................
+        # '''
+        # prefetch_requests_1 = prefetch_requests[:, ::2]
+        # prefetch_requests_2 = prefetch_requests[:, 1::2]
+        # self.trace_matrix_1 = np.concatenate((response_cycles_arr, prefetch_requests_1), axis=1)
+        # self.trace_matrix_2 = np.concatenate((response_cycles_arr, prefetch_requests_2), axis=1)
+
+        '''
+        # My changes for Mapping Technique - 1 ........................................................................
+        '''
+        prefetch_requests_1, prefetch_requests_2 = np.empty((1, 1)), np.empty((1, 1))
+        response_cycles_arr_1, response_cycles_arr_2 = np.empty((1, 1)), np.empty((1, 1))
+        num_of_cycles = response_cycles_arr.shape[0]                                        # Total number of Cycles
+        if (num_of_cycles % 2 == 0):
+            response_cycles_arr_1 = response_cycles_arr[num_of_cycles // 2:, :]
+            response_cycles_arr_2 = response_cycles_arr[num_of_cycles // 2:, :]
+        else:
+            response_cycles_arr_1 = response_cycles_arr[num_of_cycles // 2:, :]
+            response_cycles_arr_2 = response_cycles_arr[num_of_cycles // 2 + 1:, :]
+
+        prefetch_requests_1, prefetch_requests_2 = self.divide_requests(prefetch_requests)
+
+        self.trace_matrix_1 = np.concatenate((response_cycles_arr_1, prefetch_requests_1), axis=1)
+        self.trace_matrix_2 = np.concatenate((response_cycles_arr_2, prefetch_requests_2), axis=1)
+
+        self.trace_1_valid = True
+        self.trace_2_valid = True
 
         # Set active buffer contents
         active_buf_start_line_id = 0
@@ -310,6 +382,28 @@ class read_buffer:
             self.next_line_prefetch_idx = num_lines % self.fetch_matrix.shape[0]
         else:
             self.next_line_prefetch_idx = (num_lines + 1) % self.fetch_matrix.shape[0]
+
+    '''
+    # My logic to implement Mapping Technique - 1 ........................................................................
+    '''
+    def divide_requests(self, request_matrix):
+        n, m = request_matrix.shape
+        half_n = n // 2
+
+        if (n%2 == 0):
+            requests_matrix_1 = np.empty((half_n, m))
+        else:
+            requests_matrix_1 = np.empty((half_n+1, m))
+        requests_matrix_2 = np.empty((half_n, m))
+
+        for i in range(half_n):
+            requests_matrix_1[i] = request_matrix[i * 2, :]
+            requests_matrix_2[i] = request_matrix[i * 2 + 1, :]
+        
+        if (n % 2 == 1):
+            requests_matrix_1[-1] = request_matrix[-1]  
+
+        return requests_matrix_1, requests_matrix_2
 
     #
     def new_prefetch(self):
@@ -376,7 +470,8 @@ class read_buffer:
         assert response_cycles_arr.shape == cycles_arr.shape, 'The request and response cycles dims do not match'
 
         this_prefetch_trace = np.concatenate((response_cycles_arr, prefetch_requests), axis=1)
-        self.trace_matrix = np.concatenate((self.trace_matrix, this_prefetch_trace), axis=0)
+        self.trace_matrix_1 = np.concatenate((self.trace_matrix_1, this_prefetch_trace), axis=0)
+        self.trace_matrix_2 = np.concatenate((self.trace_matrix_2, this_prefetch_trace), axis=0)
 
         # Set the line to be prefetched next
         if requested_data_size > self.active_buf_size:
@@ -387,12 +482,19 @@ class read_buffer:
         # This does not need to return anything
 
     #
-    def get_trace_matrix(self):
-        if not self.trace_valid:
+    def get_trace_matrix_1(self):
+        if not self.trace_1_valid:
             print('No trace has been generated yet')
             return
 
-        return self.trace_matrix
+        return self.trace_matrix_1
+    
+    def get_trace_matrix_2(self):
+        if not self.trace_2_valid:
+            print('No trace has been generated yet')
+            return
+
+        return self.trace_matrix_2
 
     #
     def get_hit_latency(self):
@@ -404,21 +506,39 @@ class read_buffer:
 
     #
     def get_num_accesses(self):
-        assert self.trace_valid, 'Traces not ready yet'
+        assert self.trace_1_valid, 'Traces not ready yet'
         return self.num_access
+    
+    # def get_num_accesses(self):
+    #     assert self.trace_2_valid, 'Traces not ready yet'
+    #     return self.num_access
 
     #
     def get_external_access_start_stop_cycles(self):
-        assert self.trace_valid, 'Traces not ready yet'
-        start_cycle = self.trace_matrix[0][0]
-        end_cycle = self.trace_matrix[-1][0]
+        assert self.trace_1_valid, 'Traces not ready yet'
+        start_cycle = self.trace_matrix_1[0][0]
+        end_cycle = self.trace_matrix_1[-1][0]
 
         return start_cycle, end_cycle
 
+    # def get_external_access_start_stop_cycles(self):
+    #     assert self.trace_2_valid, 'Traces not ready yet'
+    #     start_cycle = self.trace_matrix_2[0][0]
+    #     end_cycle = self.trace_matrix_2[-1][0]
+
+    #     return start_cycle, end_cycle
+
     #
-    def print_trace(self, filename):
-        if not self.trace_valid:
+    def print_trace_1(self, filename):
+        if not self.trace_1_valid:
             print('No trace has been generated yet')
             return
 
-        np.savetxt(filename, self.trace_matrix, fmt='%s', delimiter=",")
+        np.savetxt(filename, self.trace_matrix_1, fmt='%s', delimiter=",")
+
+    def print_trace_2(self, filename):
+        if not self.trace_2_valid:
+            print('No trace has been generated yet')
+            return
+
+        np.savetxt(filename, self.trace_matrix_2, fmt='%s', delimiter=",")

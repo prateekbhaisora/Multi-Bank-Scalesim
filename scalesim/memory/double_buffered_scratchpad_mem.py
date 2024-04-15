@@ -20,7 +20,7 @@ class double_buffered_scratchpad:
 
         self.ifmap_buf = rdbuf()
         self.filter_buf = rdbuf()
-        self.ofmap_buf =wrbuf()
+        self.ofmap_buf = wrbuf()
 
         self.ifmap_port = rdport()
         self.filter_port = rdport()
@@ -28,7 +28,8 @@ class double_buffered_scratchpad:
 
         self.verbose = True
 
-        self.ifmap_trace_matrix = np.zeros((1,1), dtype=int)
+        # Trace matrices for SRAM
+        self.ifmap_trace_matrix = np.zeros((1,1), dtype=int)    
         self.filter_trace_matrix = np.zeros((1,1), dtype=int)
         self.ofmap_trace_matrix = np.zeros((1,1), dtype=int)
 
@@ -458,7 +459,7 @@ class double_buffered_scratchpad:
         return dram_ifmap_trace, dram_filter_trace, dram_ofmap_trace
 
     '''
-    This method prints the trace matrix for ifmap data in the scratchpad SRAM to a file.
+    These methods prints the trace matrix for ifmap, filter and ofmap data in the scratchpad SRAM to a file.
     '''
     def print_ifmap_sram_trace(self, filename):
         assert self.traces_valid, 'Traces not generated yet'
@@ -474,21 +475,23 @@ class double_buffered_scratchpad:
         assert self.traces_valid, 'Traces not generated yet'
         np.savetxt(filename, self.ofmap_trace_matrix, fmt='%i', delimiter=",")
 
-    #
+    '''
+    These methods prints the trace matrix for ifmap, filter and ofmap data in the DRAM to a file.
+    '''
     def print_ifmap_dram_1_trace(self, filename):
-        self.ifmap_buf.print_trace(filename)
+        self.ifmap_buf.print_trace_1(filename)
 
     #
     def print_ifmap_dram_2_trace(self, filename):
-        self.ifmap_buf.print_trace(filename)
+        self.ifmap_buf.print_trace_2(filename)
 
     #
     def print_filter_dram_1_trace(self, filename):
-        self.filter_buf.print_trace(filename)
+        self.filter_buf.print_trace_1(filename)
 
     #
     def print_filter_dram_2_trace(self, filename):
-        self.filter_buf.print_trace(filename)
+        self.filter_buf.print_trace_2(filename)
 
     #
     def print_ofmap_dram_1_trace(self, filename):
