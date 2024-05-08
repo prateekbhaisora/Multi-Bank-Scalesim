@@ -494,9 +494,5 @@ class double_buffered_scratchpad:
         self.filter_buf.print_trace_2(filename)
 
     #
-    def print_ofmap_dram_1_trace(self, filename):
-        self.ofmap_buf.print_trace(filename)
-
-    #
-    def print_ofmap_dram_2_trace(self, filename):
+    def print_ofmap_dram_trace(self, filename):
         self.ofmap_buf.print_trace(filename)

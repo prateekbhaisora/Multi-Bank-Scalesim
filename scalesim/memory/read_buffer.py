@@ -345,20 +345,15 @@ class read_buffer:
         # self.trace_matrix_2 = np.concatenate((response_cycles_arr, prefetch_requests_2), axis=1)
 
         '''
-        # My changes for Mapping Technique - 1 ........................................................................
+        # My logic to implement Custom Mapping Technique ........................................................................
         '''
         prefetch_requests_1, prefetch_requests_2 = np.empty((1, 1)), np.empty((1, 1))
         response_cycles_arr_1, response_cycles_arr_2 = np.empty((1, 1)), np.empty((1, 1))
-        num_of_cycles = response_cycles_arr.shape[0]                                        # Total number of Cycles
-        if (num_of_cycles % 2 == 0):
-            response_cycles_arr_1 = response_cycles_arr[num_of_cycles // 2:, :]
-            response_cycles_arr_2 = response_cycles_arr[num_of_cycles // 2:, :]
-        else:
-            response_cycles_arr_1 = response_cycles_arr[num_of_cycles // 2:, :]
-            response_cycles_arr_2 = response_cycles_arr[num_of_cycles // 2 + 1:, :]
-
+            
         prefetch_requests_1, prefetch_requests_2 = self.divide_requests(prefetch_requests)
-
+        response_cycles_arr_1 = response_cycles_arr[-prefetch_requests_1.shape[0]:]
+        response_cycles_arr_2 = response_cycles_arr[-prefetch_requests_2.shape[0]:]
+        
         self.trace_matrix_1 = np.concatenate((response_cycles_arr_1, prefetch_requests_1), axis=1)
         self.trace_matrix_2 = np.concatenate((response_cycles_arr_2, prefetch_requests_2), axis=1)
 
@@ -384,24 +379,40 @@ class read_buffer:
             self.next_line_prefetch_idx = (num_lines + 1) % self.fetch_matrix.shape[0]
 
     '''
-    # My logic to implement Mapping Technique - 1 ........................................................................
+    # My logic to implement Custom Mapping Technique ........................................................................
     '''
     def divide_requests(self, request_matrix):
         n, m = request_matrix.shape
-        half_n = n // 2
-
-        if (n%2 == 0):
-            requests_matrix_1 = np.empty((half_n, m))
-        else:
-            requests_matrix_1 = np.empty((half_n+1, m))
-        requests_matrix_2 = np.empty((half_n, m))
-
-        for i in range(half_n):
-            requests_matrix_1[i] = request_matrix[i * 2, :]
-            requests_matrix_2[i] = request_matrix[i * 2 + 1, :]
+    
+        requests_matrix_1 = np.empty((0, m))  # Initialize empty array with 0 rows
+        requests_matrix_2 = np.empty((0, m))  # Initialize empty array with 0 rows
+        tmp_1 = set()
+        tmp_2 = set()
         
-        if (n % 2 == 1):
-            requests_matrix_1[-1] = request_matrix[-1]  
+        for i in range(n):
+            for j in range(m):
+                ele = request_matrix[i, j]
+                if (ele % 2 == 0):          # Even elements in first bank
+                    tmp_1.add(ele)
+                else:                       # Odd elements in second bank
+                    tmp_2.add(ele)
+                    
+                if (len(tmp_1) == m):
+                    requests_matrix_1 = np.vstack([requests_matrix_1, list(tmp_1)])    
+                    tmp_1 = set()
+                if (len(tmp_2) == m):
+                    requests_matrix_2 = np.vstack([requests_matrix_2, list(tmp_2)])
+                    tmp_2 = set()
+                    
+        tmp_1 = list(tmp_1)
+        while len(tmp_1) < m:
+            tmp_1.append(-1)
+        tmp_2 = list(tmp_2)
+        while len(tmp_2) < m:
+            tmp_2.append(-1)
+        
+        requests_matrix_1 = np.vstack([requests_matrix_1, tmp_1]) 
+        requests_matrix_2 = np.vstack([requests_matrix_2, tmp_2])
 
         return requests_matrix_1, requests_matrix_2
 

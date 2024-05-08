@@ -198,8 +198,7 @@ class single_layer_sim:
         ifmap_dram_2_filename = dir_name +  '/IFMAP_DRAM_2_TRACE.csv'
         filter_dram_1_filename = dir_name + '/FILTER_DRAM_1_TRACE.csv'
         filter_dram_2_filename = dir_name + '/FILTER_DRAM_2_TRACE.csv'
-        ofmap_dram_1_filename = dir_name +  '/OFMAP_DRAM_1_TRACE.csv'
-        ofmap_dram_2_filename = dir_name +  '/OFMAP_DRAM_2_TRACE.csv'
+        ofmap_dram_filename = dir_name +  '/OFMAP_DRAM_TRACE.csv'
 
         self.memory_system.print_ifmap_sram_trace(ifmap_sram_filename)
         self.memory_system.print_ifmap_dram_1_trace(ifmap_dram_1_filename)
@@ -208,8 +207,7 @@ class single_layer_sim:
         self.memory_system.print_filter_dram_1_trace(filter_dram_1_filename)
         self.memory_system.print_filter_dram_2_trace(filter_dram_2_filename)
         self.memory_system.print_ofmap_sram_trace(ofmap_sram_filename)
-        self.memory_system.print_ofmap_dram_1_trace(ofmap_dram_1_filename)
-        self.memory_system.print_ofmap_dram_2_trace(ofmap_dram_2_filename)
+        self.memory_system.print_ofmap_dram_trace(ofmap_dram_filename)
 
     # This will calculate the report data for COMPUTE, BANDWIDTH, and DETAILED_ACCESS
     # The actual logic for computing the reports is in the double_buffered_scratchpad_mem.py
